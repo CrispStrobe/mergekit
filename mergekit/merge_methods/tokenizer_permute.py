@@ -13,25 +13,38 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this program. If not, see http://www.gnu.org/licenses/.
 
+# Copyright (C) 2024 Charles O. Goddard
+#
+# This software is free software: you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+#
+# This software is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+# Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with this program. If not, see http://www.gnu.org/licenses/.
+
 from typing import Any, Dict, List, Optional
 
 import torch
 from pydantic import BaseModel
+from torch._tensor import Tensor
 
 from mergekit.common import ImmutableMap, ModelReference
 from mergekit.graph import Task
-from mergekit.merge_methods.base import (
-    ConfigParameterDef,
-    MergeMethod,
-    MergeTensorInput,
-)
+from mergekit.io.tasks import GatherTensors
+from mergekit.merge_methods.base import ConfigParameterDef, MergeMethod
 from mergekit.merge_methods.slerp import slerp
 from mergekit.tokenizer import BuildTokenizer, TokenizerInfo
 
 
 class TokenizerPermutationMergeTask(Task[torch.Tensor]):
     tokenizer_task: BuildTokenizer
-    gather_tensors: MergeTensorInput
+    gather_tensors: GatherTensors
     base_model: Optional[ModelReference]
     use_slerp: bool
     slerp_t: Optional[float]
@@ -45,7 +58,7 @@ class TokenizerPermutationMergeTask(Task[torch.Tensor]):
 
     def execute(
         self, tokenizer_info: TokenizerInfo, tensors: Dict[ModelReference, torch.Tensor]
-    ) -> torch.Tensor:
+    ) -> Tensor:
         if not tensors:
             return None
         if len(tensors) == 1:
@@ -79,10 +92,23 @@ class TokenizerPermutationMergeTask(Task[torch.Tensor]):
 
             is_base = model == self.base_model
             if self.use_slerp:
-                weight = (1.0 - self.slerp_t) if is_base else self.slerp_t
+                if self.slerp_t is not None:
+                    weight = (1.0 - self.slerp_t) if is_base else self.slerp_t
+                else:
+                    raise RuntimeError("slerp_t is None but use_slerp is True")
             else:
-                weight = self.tensor_parameters[model]["weight"]
-
+                weight = self.tensor_parameters[model]["weight"] or 1.0
+                
+                #try:
+                #    weight = self.tensor_parameters[model]["weight"]
+                #except KeyError:
+                #    weight = 1.0  # Fallback to default weight of 1.0
+                
+#            if self.use_slerp:
+#                weight = (1.0 - self.slerp_t) if is_base else self.slerp_t
+#            else:
+#                weight = self.tensor_parameters[model]["weight"] or 1.0
+                    
             weights.append(weight)
 
         expanded = torch.stack(expanded, dim=0)
@@ -137,7 +163,7 @@ class TokenizerPermutationMerge(MergeMethod, BaseModel):
     def make_task(
         self,
         *,
-        tensors: MergeTensorInput,
+        tensors: GatherTensors,
         parameters: Dict[str, Any],
         tensor_parameters: ImmutableMap[ModelReference, ImmutableMap[str, Any]],
         base_model: Optional[ModelReference],
