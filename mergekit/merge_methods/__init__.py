@@ -13,18 +13,19 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this program. If not, see http://www.gnu.org/licenses/.
 
+
 from mergekit.merge_methods.base import MergeMethod
 from mergekit.merge_methods.generalized_task_arithmetic import (
     ConsensusMethod,
     GeneralizedTaskArithmeticMerge,
     SparsificationMethod,
+    get_enhanced_ties_params,
 )
 from mergekit.merge_methods.linear import LinearMerge
 from mergekit.merge_methods.model_stock import ModelStockMerge
 from mergekit.merge_methods.passthrough import PassthroughMerge
 from mergekit.merge_methods.slerp import SlerpMerge
 from mergekit.merge_methods.tokenizer_permute import TokenizerPermutationMerge
-
 
 def get(method: str) -> MergeMethod:
     if method == "linear":
@@ -45,6 +46,14 @@ def get(method: str) -> MergeMethod:
             consensus_method=ConsensusMethod.sum,
             sparsification_method=SparsificationMethod.magnitude,
             default_normalize=True,
+            default_rescale=False,
+        )
+    elif method == "ties_enhanced":
+        params = get_enhanced_ties_params()
+        return GeneralizedTaskArithmeticMerge(
+            consensus_method=params["consensus"],
+            sparsification_method=params["sparsification"],
+            default_normalize=params["default_normalize"],
             default_rescale=False,
         )
     elif method == "dare_ties":
@@ -77,7 +86,6 @@ def get(method: str) -> MergeMethod:
         )
     elif method == "model_stock":
         return ModelStockMerge()
-
     elif method == "della":
         return GeneralizedTaskArithmeticMerge(
             consensus_method=ConsensusMethod.sum,
@@ -85,7 +93,6 @@ def get(method: str) -> MergeMethod:
             default_normalize=True,
             default_rescale=True,
         )
-
     elif method == "della_linear":
         return GeneralizedTaskArithmeticMerge(
             consensus_method=None,
@@ -94,7 +101,6 @@ def get(method: str) -> MergeMethod:
             default_rescale=True,
         )
     raise RuntimeError(f"Unimplemented merge method {method}")
-
 
 __all__ = [
     "MergeMethod",
