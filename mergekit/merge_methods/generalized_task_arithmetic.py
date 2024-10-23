@@ -38,12 +38,9 @@ class ConsensusMethod(str, Enum):
 def get_enhanced_ties_params():
     return {
         "consensus": ConsensusMethod.sum,
-        "sparsification": SparsificationMethod.rank_magnitude_sampling,
-        "default_normalize": False,
-        "post_process_factor": 1.5,
-        "magnitude_threshold": 1e-4,
-        "epsilon": 0.95,
-        "lambda": 1.5
+        "sparsification": SparsificationMethod.magnitude,
+        "default_normalize": True,
+        "default_rescale": False,
     }
 
 class GeneralizedTaskArithmeticMerge(MergeMethod, BaseModel, frozen=True):
@@ -67,6 +64,12 @@ class GeneralizedTaskArithmeticMerge(MergeMethod, BaseModel, frozen=True):
             ConfigParameterDef(
                 name="magnitude_threshold", required=False, default_value=1e-4
             ),
+            ConfigParameterDef(
+                name="consensus_method", required=False
+            ),
+            ConfigParameterDef(
+                name="sparsification_method", required=False
+            ),
         ]
 
     def tensor_parameters(self) -> List[ConfigParameterDef]:
@@ -85,13 +88,13 @@ class GeneralizedTaskArithmeticMerge(MergeMethod, BaseModel, frozen=True):
             res.append(
                 ConfigParameterDef(
                     name="epsilon",
-                    default_value=0.95,  # Will be overridden by global param if set
+                    default_value=0.95,
                 )
             )
             res.append(
                 ConfigParameterDef(
                     name="lambda",
-                    default_value=1.5,  # Will be overridden by global param if set
+                    default_value=1.5,
                 )
             )
         return res
@@ -104,7 +107,6 @@ class GeneralizedTaskArithmeticMerge(MergeMethod, BaseModel, frozen=True):
         parameters: ImmutableMap[str, Any],
         tensor_parameters: ImmutableMap[ModelReference, ImmutableMap[str, Any]],
     ) -> Task:
-        # Use dictionary access for ImmutableMap
         consensus_method = self.consensus_method
         if "consensus_method" in parameters:
             consensus_method = ConsensusMethod[parameters["consensus_method"]]
@@ -116,20 +118,7 @@ class GeneralizedTaskArithmeticMerge(MergeMethod, BaseModel, frozen=True):
                 if parameters["sparsification_method"]
                 else None
             )
-    
-        # Propagate epsilon and lambda to tensor parameters if provided
-        if "epsilon" in parameters or "lambda" in parameters:
-            new_tensor_parameters = ImmutableMap(tensor_parameters.data.copy())
-            for model_ref in new_tensor_parameters.keys():
-                params = dict(new_tensor_parameters[model_ref])
-                if "epsilon" in parameters:
-                    params["epsilon"] = parameters["epsilon"]
-                if "lambda" in parameters:
-                    params["lambda"] = parameters["lambda"]
-                new_tensor_parameters = new_tensor_parameters.set(model_ref, ImmutableMap(params))
-        else:
-            new_tensor_parameters = tensor_parameters
-    
+
         return GTATask(
             method=self.__class__(
                 consensus_method=consensus_method,
@@ -139,7 +128,7 @@ class GeneralizedTaskArithmeticMerge(MergeMethod, BaseModel, frozen=True):
             ),
             tensors=tensors,
             base_model=base_model,
-            tensor_parameters=new_tensor_parameters,
+            tensor_parameters=tensor_parameters,
             int8_mask=parameters["int8_mask"],
             normalize=parameters["normalize"],
             rescale=parameters["rescale"],
@@ -179,7 +168,7 @@ class GTATask(Task[torch.Tensor]):
         )
         if not tvs:
             return base
-    
+
         if self.method.sparsification_method:
             for tv_info in tvs:
                 kwargs = {}
@@ -187,10 +176,7 @@ class GTATask(Task[torch.Tensor]):
                     kwargs["gamma"] = tv_info["gamma"]
                 if "epsilon" in tv_info:
                     kwargs["epsilon"] = tv_info["epsilon"]
-                    
-                # Store lambda for later use
-                lambda_value = tv_info.get("lambda", 1.0)
-                
+
                 tv_info["delta"] = sparsify(
                     tv_info["delta"],
                     density=tv_info["density"],
@@ -198,20 +184,16 @@ class GTATask(Task[torch.Tensor]):
                     rescale=self.rescale,
                     **kwargs,
                 )
-                
-                # Apply lambda after sparsification
-                if lambda_value != 1.0:
-                    tv_info["delta"] *= lambda_value
-    
+
         deltas = torch.stack([tv["delta"] for tv in tvs], dim=0)
         weights = torch.tensor(
             [tv["weight"] for tv in tvs], dtype=deltas.dtype, device=deltas.device
         )
         while len(deltas.shape) > len(weights.shape):
             weights.unsqueeze_(-1)
-    
+
         weighted_deltas = deltas * weights
-    
+
         if self.method.consensus_method:
             mask_dtype = torch.int8 if self.int8_mask else base.dtype
             mask = get_mask(
@@ -227,12 +209,12 @@ class GTATask(Task[torch.Tensor]):
             mixed_delta = weighted_deltas.sum(dim=0)
             divisor = weights.sum(dim=0)
             divisor[divisor.abs() < 1e-8] = 1
-    
+
         if self.normalize:
             mixed_delta /= divisor
-    
+
         mixed_delta *= self.post_process_factor
-    
+
         return (base + mixed_delta).to(base.dtype)
 
 def get_task_vectors(
