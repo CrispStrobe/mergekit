@@ -179,7 +179,7 @@ class GTATask(Task[torch.Tensor]):
         )
         if not tvs:
             return base
-
+    
         if self.method.sparsification_method:
             for tv_info in tvs:
                 kwargs = {}
@@ -187,9 +187,10 @@ class GTATask(Task[torch.Tensor]):
                     kwargs["gamma"] = tv_info["gamma"]
                 if "epsilon" in tv_info:
                     kwargs["epsilon"] = tv_info["epsilon"]
-                if "lambda" in tv_info:
-                    kwargs["lambda"] = tv_info["lambda"]
                     
+                # Store lambda for later use
+                lambda_value = tv_info.get("lambda", 1.0)
+                
                 tv_info["delta"] = sparsify(
                     tv_info["delta"],
                     density=tv_info["density"],
@@ -197,16 +198,20 @@ class GTATask(Task[torch.Tensor]):
                     rescale=self.rescale,
                     **kwargs,
                 )
-
+                
+                # Apply lambda after sparsification
+                if lambda_value != 1.0:
+                    tv_info["delta"] *= lambda_value
+    
         deltas = torch.stack([tv["delta"] for tv in tvs], dim=0)
         weights = torch.tensor(
             [tv["weight"] for tv in tvs], dtype=deltas.dtype, device=deltas.device
         )
         while len(deltas.shape) > len(weights.shape):
             weights.unsqueeze_(-1)
-
+    
         weighted_deltas = deltas * weights
-
+    
         if self.method.consensus_method:
             mask_dtype = torch.int8 if self.int8_mask else base.dtype
             mask = get_mask(
@@ -222,12 +227,12 @@ class GTATask(Task[torch.Tensor]):
             mixed_delta = weighted_deltas.sum(dim=0)
             divisor = weights.sum(dim=0)
             divisor[divisor.abs() < 1e-8] = 1
-
+    
         if self.normalize:
             mixed_delta /= divisor
-
+    
         mixed_delta *= self.post_process_factor
-
+    
         return (base + mixed_delta).to(base.dtype)
 
 def get_task_vectors(
