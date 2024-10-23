@@ -54,7 +54,7 @@ def get(method: str) -> MergeMethod:
             consensus_method=params["consensus"],
             sparsification_method=params["sparsification"],
             default_normalize=params["default_normalize"],
-            default_rescale=False,
+            default_rescale=params["default_rescale"],
         )
     elif method == "dare_ties":
         return GeneralizedTaskArithmeticMerge(
