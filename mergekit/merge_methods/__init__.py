@@ -27,6 +27,7 @@ from mergekit.merge_methods.passthrough import PassthroughMerge
 from mergekit.merge_methods.slerp import SlerpMerge
 from mergekit.merge_methods.tokenizer_permute import TokenizerPermutationMerge
 
+
 def get(method: str) -> MergeMethod:
     if method == "linear":
         return LinearMerge()
@@ -36,51 +37,51 @@ def get(method: str) -> MergeMethod:
         return PassthroughMerge()
     elif method == "task_arithmetic":
         return GeneralizedTaskArithmeticMerge(
-            consensus_method=None,
-            sparsification_method=None,
+            consensus=None,  # Corrected parameter name
+            sparsification=None,  # Corrected parameter name
             default_normalize=False,
             default_rescale=False,
         )
     elif method == "ties":
         return GeneralizedTaskArithmeticMerge(
-            consensus_method=ConsensusMethod.sum,
-            sparsification_method=SparsificationMethod.magnitude,
+            consensus=ConditionalParameter(value=ConsensusMethod.sum.value),  # Corrected parameter name and wrapped in ConditionalParameter
+            sparsification=ConditionalParameter(value=SparsificationMethod.magnitude.value),  # Corrected parameter name and wrapped
             default_normalize=True,
             default_rescale=False,
         )
     elif method == "ties_enhanced":
         params = get_enhanced_ties_params()
         return GeneralizedTaskArithmeticMerge(
-            consensus_method=params["consensus"],
-            sparsification_method=params["sparsification"],
+            consensus=params["consensus"],  # Corrected parameter name
+            sparsification=params["sparsification"],  # Corrected parameter name
             default_normalize=params["default_normalize"],
             default_rescale=params["default_rescale"],
         )
     elif method == "dare_ties":
         return GeneralizedTaskArithmeticMerge(
-            consensus_method=ConsensusMethod.sum,
-            sparsification_method=SparsificationMethod.random,
+            consensus=ConditionalParameter(value=ConsensusMethod.sum.value),
+            sparsification=ConditionalParameter(value=SparsificationMethod.random.value),
             default_normalize=False,
             default_rescale=True,
         )
     elif method == "dare_linear":
         return GeneralizedTaskArithmeticMerge(
-            consensus_method=None,
-            sparsification_method=SparsificationMethod.random,
+            consensus=None,
+            sparsification=ConditionalParameter(value=SparsificationMethod.random.value),
             default_normalize=False,
             default_rescale=True,
         )
     elif method == "breadcrumbs":
         return GeneralizedTaskArithmeticMerge(
-            consensus_method=None,
-            sparsification_method=SparsificationMethod.magnitude_outliers,
+            consensus=None,
+            sparsification=ConditionalParameter(value=SparsificationMethod.magnitude_outliers.value),
             default_normalize=False,
             default_rescale=False,
         )
     elif method == "breadcrumbs_ties":
         return GeneralizedTaskArithmeticMerge(
-            consensus_method=ConsensusMethod.sum,
-            sparsification_method=SparsificationMethod.magnitude_outliers,
+            consensus=ConditionalParameter(value=ConsensusMethod.sum.value),
+            sparsification=ConditionalParameter(value=SparsificationMethod.magnitude_outliers.value),
             default_normalize=False,
             default_rescale=False,
         )
@@ -88,15 +89,15 @@ def get(method: str) -> MergeMethod:
         return ModelStockMerge()
     elif method == "della":
         return GeneralizedTaskArithmeticMerge(
-            consensus_method=ConsensusMethod.sum,
-            sparsification_method=SparsificationMethod.rank_magnitude_sampling,
+            consensus=ConditionalParameter(value=ConsensusMethod.sum.value),
+            sparsification=ConditionalParameter(value=SparsificationMethod.rank_magnitude_sampling.value),
             default_normalize=True,
             default_rescale=True,
         )
     elif method == "della_linear":
         return GeneralizedTaskArithmeticMerge(
-            consensus_method=None,
-            sparsification_method=SparsificationMethod.rank_magnitude_sampling,
+            consensus=None,
+            sparsification=ConditionalParameter(value=SparsificationMethod.rank_magnitude_sampling.value),
             default_normalize=False,
             default_rescale=True,
         )
