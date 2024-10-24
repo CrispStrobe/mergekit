@@ -15,12 +15,14 @@
 
 import logging
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ValidationError
 from typing_extensions import Literal
 
+# Import ConditionalParameter from config.py
+from mergekit.config import ConditionalParameter
 from mergekit.architecture import WeightInfo
 from mergekit.common import ImmutableMap, ModelReference
 from mergekit.graph import Task
@@ -31,73 +33,68 @@ from mergekit.merge_methods.base import (
 )
 from mergekit.sparsify import SparsificationMethod, sparsify
 
+
+# Define ConsensusMethod Enum
 class ConsensusMethod(str, Enum):
     count = "count"
     sum = "sum"
 
-def get_enhanced_ties_params():
+
+def get_enhanced_ties_params() -> Dict[str, Any]:
+    """
+    Returns default parameters for enhanced TIES.
+    Now returns strings instead of ConditionalParameter.
+    """
     return {
-        "consensus": ConsensusMethod.sum,
-        "sparsification": SparsificationMethod.magnitude,
+        "consensus": ConsensusMethod.sum,  # Direct Enum value
+        "sparsification": SparsificationMethod.magnitude,  # Direct Enum value
         "default_normalize": True,
         "default_rescale": False,
+        "model_parameters": {  # Add default model parameters
+            "weight": 1.1,
+            "density": 1.0,
+            "epsilon": 0.95,
+            "lambda": 1.5
+        }
     }
 
-class GeneralizedTaskArithmeticMerge(MergeMethod, BaseModel, frozen=True):
-    consensus_method: Optional[ConsensusMethod]
-    sparsification_method: Optional[SparsificationMethod]
-    default_normalize: bool
-    default_rescale: bool
+class GeneralizedTaskArithmeticMerge(MergeMethod, BaseModel):
+    """
+    A Pydantic model representing the configuration for the Generalized Task Arithmetic Merge method.
+    """
+    consensus_method: Optional[ConsensusMethod] = Field(  # Changed to direct Enum
+        default=None, description="Consensus method for merging."
+    )
+    sparsification_method: Optional[SparsificationMethod] = Field(  # Changed to direct Enum
+        default=None, description="Sparsification method for merging."
+    )
+    default_normalize: bool = Field(
+        default=True, description="Default normalization flag."
+    )
+    default_rescale: bool = Field(
+        default=False, description="Default rescale flag."
+    )
 
-    def parameters(self) -> List[ConfigParameterDef]:
-        return [
-            ConfigParameterDef(name="int8_mask", required=False, default_value=False),
-            ConfigParameterDef(
-                name="normalize", required=False, default_value=self.default_normalize
-            ),
-            ConfigParameterDef(
-                name="rescale", required=False, default_value=self.default_rescale
-            ),
-            ConfigParameterDef(
-                name="post_process_factor", required=False, default_value=1.0
-            ),
-            ConfigParameterDef(
-                name="magnitude_threshold", required=False, default_value=1e-4
-            ),
-            ConfigParameterDef(
-                name="consensus_method", required=False
-            ),
-            ConfigParameterDef(
-                name="sparsification_method", required=False
-            ),
-        ]
+    class Config:
+        frozen = True
 
-    def tensor_parameters(self) -> List[ConfigParameterDef]:
-        res = [
-            ConfigParameterDef(name="weight", required=True),
-            ConfigParameterDef(name="density", required=False, default_value=1.0),
-        ]
-        if self.sparsification_method == SparsificationMethod.magnitude_outliers:
-            res.append(
-                ConfigParameterDef(
-                    name="gamma",
-                    default_value=0.01,
-                )
-            )
-        if self.sparsification_method == SparsificationMethod.rank_magnitude_sampling:
-            res.append(
-                ConfigParameterDef(
-                    name="epsilon",
-                    default_value=0.95,
-                )
-            )
-            res.append(
-                ConfigParameterDef(
-                    name="lambda",
-                    default_value=1.5,
-                )
-            )
-        return res
+    def get_enhanced_ties_params() -> Dict[str, Any]:
+        """
+        Returns default parameters for enhanced TIES.
+        Now returns strings instead of ConditionalParameter.
+        """
+        return {
+            "consensus": ConsensusMethod.sum,  # Direct Enum value
+            "sparsification": SparsificationMethod.magnitude,  # Direct Enum value
+            "default_normalize": True,
+            "default_rescale": False,
+            "model_parameters": {  # Add default model parameters
+                "weight": 1.1,
+                "density": 1.0,
+                "epsilon": 0.95,
+                "lambda": 1.5
+            }
+        }
 
     def make_task(
         self,
@@ -106,53 +103,64 @@ class GeneralizedTaskArithmeticMerge(MergeMethod, BaseModel, frozen=True):
         base_model: Optional[ModelReference],
         parameters: ImmutableMap[str, Any],
         tensor_parameters: ImmutableMap[ModelReference, ImmutableMap[str, Any]],
-    ) -> Task:
-        consensus_method = self.consensus_method
-        if "consensus_method" in parameters:
-            consensus_method = ConsensusMethod[parameters["consensus_method"]]
-            
-        sparsification_method = self.sparsification_method
-        if "sparsification_method" in parameters:
-            sparsification_method = (
-                SparsificationMethod[parameters["sparsification_method"]]
-                if parameters["sparsification_method"]
-                else None
-            )
-
+    ) -> "GTATask":
+        print("DEBUG: MAKE_TASK INPUT")
+        print(f"parameters: {parameters}")
+        print(f"parameters data: {parameters.data}")
+    
+        # Create tensor parameters with default values
+        default_params = get_enhanced_ties_params()["model_parameters"]
+        
+        tensor_params_dict = {}
+        for model_ref in tensor_parameters.data.keys():
+            if model_ref != base_model:  # Only add parameters for non-base models
+                tensor_params_dict[model_ref] = default_params.copy()
+                print(f"Injected default params for {model_ref}: {tensor_params_dict[model_ref]}")
+            else:
+                tensor_params_dict[model_ref] = {}
+    
+        processed_tensor_parameters = ImmutableMap(tensor_params_dict)
+    
         return GTATask(
-            method=self.__class__(
-                consensus_method=consensus_method,
-                sparsification_method=sparsification_method,
-                default_normalize=self.default_normalize,
-                default_rescale=self.default_rescale,
-            ),
+            method=self,  # Changed from self.__class__(...) to just self
             tensors=tensors,
             base_model=base_model,
-            tensor_parameters=tensor_parameters,
-            int8_mask=parameters["int8_mask"],
-            normalize=parameters["normalize"],
-            rescale=parameters["rescale"],
+            tensor_parameters=processed_tensor_parameters,
+            int8_mask=parameters["int8_mask"] if "int8_mask" in parameters else False,
+            normalize=parameters["normalize"] if "normalize" in parameters else self.default_normalize,
+            rescale=parameters["rescale"] if "rescale" in parameters else self.default_rescale,
             post_process_factor=parameters["post_process_factor"] if "post_process_factor" in parameters else 1.0,
             magnitude_threshold=parameters["magnitude_threshold"] if "magnitude_threshold" in parameters else 1e-4,
             weight_info=output_weight,
         )
 
+
 class GTATask(Task[torch.Tensor]):
+    """
+    Represents a Generalized Task Arithmetic (GTA) Task for merging tensors.
+    """
+
     method: GeneralizedTaskArithmeticMerge
     tensors: MergeTensorInput
     base_model: ModelReference
-    weight_info: WeightInfo
     tensor_parameters: ImmutableMap[ModelReference, Any]
     int8_mask: bool
     normalize: bool
     rescale: bool
     post_process_factor: float
     magnitude_threshold: float
+    weight_info: WeightInfo
 
     def uses_accelerator(self) -> bool:
+        """
+        Indicates whether this task utilizes hardware accelerators.
+        """
         return True
 
     def arguments(self) -> Dict[str, Task]:
+        """
+        Defines the arguments required to execute this task.
+        """
         return {"tensors": self.tensors}
 
     def execute(
@@ -168,39 +176,44 @@ class GTATask(Task[torch.Tensor]):
         )
         if not tvs:
             return base
-
-        if self.method.sparsification_method:
+    
+        if self.method.sparsification_method:  # Using sparsification_method
             for tv_info in tvs:
                 kwargs = {}
                 if "gamma" in tv_info:
                     kwargs["gamma"] = tv_info["gamma"]
                 if "epsilon" in tv_info:
                     kwargs["epsilon"] = tv_info["epsilon"]
-
+                if "lambda" in tv_info:
+                    kwargs["lambda"] = tv_info["lambda"]
+    
                 tv_info["delta"] = sparsify(
                     tv_info["delta"],
                     density=tv_info["density"],
-                    method=self.method.sparsification_method,
+                    method=self.method.sparsification_method,  # Using sparsification_method
                     rescale=self.rescale,
                     **kwargs,
                 )
-
+    
         deltas = torch.stack([tv["delta"] for tv in tvs], dim=0)
         weights = torch.tensor(
-            [tv["weight"] for tv in tvs], dtype=deltas.dtype, device=deltas.device
+            [tv["weight"] for tv in tvs],
+            dtype=deltas.dtype,
+            device=deltas.device,
         )
         while len(deltas.shape) > len(weights.shape):
-            weights.unsqueeze_(-1)
-
+            weights = weights.unsqueeze(-1)
+    
         weighted_deltas = deltas * weights
-
+    
+        # Changed from consensus to consensus_method
         if self.method.consensus_method:
             mask_dtype = torch.int8 if self.int8_mask else base.dtype
             mask = get_mask(
                 weighted_deltas,
-                method=self.method.consensus_method,
+                method=self.method.consensus_method.value,  # Using consensus_method.value
                 mask_dtype=mask_dtype,
-                magnitude_threshold=self.magnitude_threshold
+                magnitude_threshold=self.magnitude_threshold,
             )
             mixed_delta = (weighted_deltas * mask).sum(dim=0)
             divisor = (weights * mask).sum(dim=0)
@@ -209,19 +222,28 @@ class GTATask(Task[torch.Tensor]):
             mixed_delta = weighted_deltas.sum(dim=0)
             divisor = weights.sum(dim=0)
             divisor[divisor.abs() < 1e-8] = 1
-
+    
         if self.normalize:
             mixed_delta /= divisor
-
+    
         mixed_delta *= self.post_process_factor
-
+    
         return (base + mixed_delta).to(base.dtype)
+
+    
+
+    def group_label(self) -> Optional[str]:
+        """
+        Returns the group label for this task, if any.
+        """
+        return self.tensors.group_label()
+
 
 def get_task_vectors(
     weight_info: WeightInfo,
     base_model: ModelReference,
     tensors: ImmutableMap[ModelReference, torch.Tensor],
-    tensor_parameters: ImmutableMap[ModelReference, ImmutableMap[str, Any]],
+    tensor_parameters: ImmutableMap[ModelReference, Dict[str, Any]],
 ) -> Tuple[List[Dict[str, Any]], torch.Tensor]:
     keys = list(tensors.keys())
     base = tensors[base_model]
@@ -245,20 +267,64 @@ def get_task_vectors(
         del x
         del tensors[model]
 
-        d = {}
-        d["model"] = model
-        d["delta"] = delta
-        for p in tensor_parameters[model]:
-            d[p] = tensor_parameters[model][p]
+        # Debug print
+        print(f"Model: {model}")
+        print(f"Tensor parameters: {tensor_parameters[model]}")  # Changed this line
+
+        d = {
+            "model": model,
+            "delta": delta
+        }
+        # Add all parameters from tensor_parameters
+        if model in tensor_parameters:
+            params = tensor_parameters[model]
+            if hasattr(params, 'data'):  # If it's an ImmutableMap
+                params = params.data
+            for key, value in params.items():
+                d[key] = value
+                print(f"Adding parameter {key}: {value}")
+
         res.append(d)
+        print(f"Final d: {d.keys()}")
+
     return res, base
+
+def execute(
+    self,
+    tensors: Dict[ModelReference, torch.Tensor],
+    **_kwargs,
+) -> torch.Tensor:
+    # Add debug prints
+    print("Starting execute")
+    tvs, base = get_task_vectors(
+        self.weight_info,
+        self.base_model,
+        tensors,
+        tensor_parameters=self.tensor_parameters.data,
+    )
+    print(f"Task vectors: {[tv.keys() for tv in tvs]}")
+    if not tvs:
+        return base
+
 
 def get_mask(
     delta: torch.Tensor,
     method: Literal["sum", "count"] = "sum",
     mask_dtype: Optional[torch.dtype] = None,
     magnitude_threshold: float = 1e-4,
-):
+) -> torch.Tensor:
+    """
+    Generates a mask determining which delta vectors should be merged into the final model.
+
+    Args:
+        delta (torch.Tensor): The tensor of deltas to be merged.
+        method (Literal["sum", "count"], optional): The consensus method to use. Defaults to "sum".
+        mask_dtype (Optional[torch.dtype], optional): The data type of the mask. Defaults to None.
+        magnitude_threshold (float, optional): The threshold for magnitude-based masking. Defaults to 1e-4.
+
+    Returns:
+        torch.Tensor: The generated mask tensor.
+    """
     if mask_dtype is None:
         mask_dtype = delta.dtype
 
@@ -276,3 +342,4 @@ def get_mask(
         raise RuntimeError(f'Unimplemented mask method "{method}"')
 
     return sign == majority_sign
+
