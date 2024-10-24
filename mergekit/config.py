@@ -13,6 +13,7 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this program. If not, see http://www.gnu.org/licenses/.
 
+
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 import yaml
@@ -22,7 +23,8 @@ from typing_extensions import Literal, TypeAlias
 from mergekit.common import ModelReference
 from mergekit.tokenizer.config import TokenizerConfig
 
-ScalarOrGradient: TypeAlias = Union[float, List[float]]
+# Updated Type Alias to include 'str'
+ScalarOrGradient: TypeAlias = Union[float, List[float], str]
 
 
 class ConditionalParameter(BaseModel):
